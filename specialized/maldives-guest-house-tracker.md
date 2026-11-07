@@ -426,7 +426,7 @@ Rules for the export:
 ```python
 # export_excel.py — fill the template's input columns from rates.sqlite
 import sqlite3, openpyxl
-def export(db_path="rates.sqlite", template="sukun-maldives-guest-houses-template.xlsx", out="upload.xlsx"):
+def export(db_path="rates.sqlite", template="examples/maldives-guest-house-tracker/sukun-maldives-guest-houses-template.xlsx", out="upload.xlsx"):
     wb = openpyxl.load_workbook(template)          # keeps the template's formulas and dropdowns
     ws = wb["Availability"]
     rows = sqlite3.connect(db_path).execute("""
