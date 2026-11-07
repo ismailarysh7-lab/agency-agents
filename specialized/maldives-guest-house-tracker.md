@@ -418,7 +418,7 @@ When the user publishes the data on their own website, the tracker also writes a
 
 Rules for the export:
 - `property_id` is the user's own permanent key (e.g. `SUK-MAF-001`) and links every sheet to the website listing; platform hotel IDs are never used as the website key
-- `available` is `Yes` if any platform has the night open, `No` if every listed platform is sold out, `No data` if nothing could be read; errors never become `No`
+- `available` is `Yes` if any platform has the night open, `No` only if both Booking.com and Agoda report it sold out, otherwise `No data`; errors and unlisted platforms never become `No`
 - `lowest_price_per_night_usd` is the lowest **all-in** price (service charge, T-GST, green tax) across platforms; leave it blank when the tax basis is unknown rather than publish a guessed figure
 - Dates are real dates (`yyyy-mm-dd`, Maldives time); prices are numbers in USD, never text with currency symbols
 - If the importer needs CSV, export only `Website_Feed` as CSV UTF-8
