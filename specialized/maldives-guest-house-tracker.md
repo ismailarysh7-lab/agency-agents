@@ -74,14 +74,16 @@ settings:
   low_availability_rooms: 2          # flag nights with this many rooms left or fewer
 
 properties:
-  - name: "Example Beach Guest House"
+  - property_id: SUK-MAF-001          # your permanent key — links to the website listing
+    name: "Example Beach Guest House"
     island: Maafushi
     atoll: Kaafu (South Malé)
     own_property: true               # owners: mark your own; travelers: omit
     mot_registered: true             # confirmed on the Ministry of Tourism register
     booking_hotel_id: 1234567
     agoda_hotel_id: 7654321
-  - name: "Example Sandbank Inn"
+  - property_id: SUK-THU-001
+    name: "Example Sandbank Inn"
     island: Thulusdhoo
     atoll: Kaafu (North Malé)
     mot_registered: true
@@ -126,6 +128,7 @@ CREATE TABLE IF NOT EXISTS observations (
   observed_at       TEXT NOT NULL,        -- ISO-8601 UTC timestamp of the run
   kind              TEXT NOT NULL CHECK (kind IN ('price','availability')),
   platform          TEXT NOT NULL CHECK (platform IN ('agoda','booking')),
+  property_id       TEXT NOT NULL,        -- the user's own key, e.g. SUK-MAF-001
   property_name     TEXT NOT NULL,
   island            TEXT NOT NULL,
   atoll             TEXT,
@@ -267,7 +270,7 @@ def pick_comparable(offers):
     pref = [o for o in offers if o.get("refundable") and o.get("meal_plan") == "breakfast"]
     return min(pref or offers, key=lambda o: o["total_price"])
 
-COLS = ("observed_at,kind,platform,property_name,island,atoll,platform_hotel_id,checkin,nights,adults,"
+COLS = ("observed_at,kind,platform,property_id,property_name,island,atoll,platform_hotel_id,checkin,nights,adults,"
         "status,rooms_left,room_types_open,room_name,meal_plan,refundable,total_price,price_per_night,"
         "includes_tgst,includes_service,includes_green_tax,all_in_total,currency,raw_json")
 
@@ -303,7 +306,7 @@ def run(config_path="watchlist.yaml", db_path="rates.sqlite"):
         mapped = {str(p[key]): p for p in props if p.get(key)}
         for p in props:
             if not p.get(key):
-                insert(db, observed_at=now, kind="price", platform=adapter.platform, property_name=p["name"],
+                insert(db, observed_at=now, kind="price", platform=adapter.platform, property_id=p["property_id"], property_name=p["name"],
                        island=p["island"], atoll=p.get("atoll"), platform_hotel_id="-",
                        checkin=today.isoformat(), nights=0, adults=g["adults"], status="unmapped")
         for kind, ci, n in stays(st, today):
@@ -315,7 +318,7 @@ def run(config_path="watchlist.yaml", db_path="rates.sqlite"):
             for hid, p in mapped.items():
                 offers = results.get(hid, [])
                 best = pick_comparable(offers)
-                row = dict(observed_at=now, kind=kind, platform=adapter.platform, property_name=p["name"],
+                row = dict(observed_at=now, kind=kind, platform=adapter.platform, property_id=p["property_id"], property_name=p["name"],
                            island=p["island"], atoll=p.get("atoll"), platform_hotel_id=hid,
                            checkin=ci.isoformat(), nights=n, adults=g["adults"],
                            status="error" if error else ("available" if best else "sold_out"),
@@ -401,7 +404,45 @@ Maafushi is filling fast for the festive season; you have ≤ 2 rooms left for D
 
 For travelers, the takeaway becomes a buy/wait note: "Example Sandbank Inn reopened Nov 21–23 on Agoda and is 11% cheaper than last week — the lowest price seen in 30 days. Free cancellation, so booking now carries little risk."
 
-### 8. Scheduling
+### 8. Excel Export for Website Upload
+
+When the user publishes the data on their own website, the tracker also writes a daily workbook in a fixed layout, so the site's importer can be mapped once and reused. Sheet and column names are a contract: never rename or reorder them.
+
+| Sheet | One row per | Columns |
+|---|---|---|
+| `Website_Feed` (the upload) | guest house × night | property_id, guest_house_name, island, atoll, website_slug, date, booking_status, agoda_status, available, rooms_left, lowest_price_per_night_usd, cheapest_platform, booking_url, agoda_url, last_updated |
+| `Properties` | guest house | property_id, guest_house_name, island, atoll, property_type, mot_registered, total_rooms, booking_hotel_id, agoda_hotel_id, booking_url, agoda_url, website_slug, active, notes |
+| `Availability` | guest house × night × platform | collected_at, property_id, guest_house_name, island, date, platform, status, rooms_left, adults, price_as_shown_usd, includes_service, includes_tgst, includes_green_tax, all_in_per_night_usd |
+| `Rates` | guest house × stay × platform | collected_at, property_id, guest_house_name, island, platform, checkin, nights, checkout, adults, room_type, meal_plan, cancellation, status, total_as_shown_usd, includes_service, includes_tgst, includes_green_tax, all_in_total_usd, all_in_per_night_usd, rooms_left |
+| `Tax_Rates` | — | service charge, T-GST, green tax per person per night, effective date, source checked |
+
+Rules for the export:
+- `property_id` is the user's own permanent key (e.g. `SUK-MAF-001`) and links every sheet to the website listing; platform hotel IDs are never used as the website key
+- `available` is `Yes` if any platform has the night open, `No` if every listed platform is sold out, `No data` if nothing could be read; errors never become `No`
+- `lowest_price_per_night_usd` is the lowest **all-in** price (service charge, T-GST, green tax) across platforms; leave it blank when the tax basis is unknown rather than publish a guessed figure
+- Dates are real dates (`yyyy-mm-dd`, Maldives time); prices are numbers in USD, never text with currency symbols
+- If the importer needs CSV, export only `Website_Feed` as CSV UTF-8
+
+```python
+# export_excel.py — fill the template's input columns from rates.sqlite
+import sqlite3, openpyxl
+def export(db_path="rates.sqlite", template="sukun-maldives-guest-houses-template.xlsx", out="upload.xlsx"):
+    wb = openpyxl.load_workbook(template)          # keeps the template's formulas and dropdowns
+    ws = wb["Availability"]
+    rows = sqlite3.connect(db_path).execute("""
+        SELECT observed_at, property_id, checkin, platform, status, rooms_left, adults, total_price,
+               CASE includes_service WHEN 1 THEN 'Yes' WHEN 0 THEN 'No' END,
+               CASE includes_tgst WHEN 1 THEN 'Yes' WHEN 0 THEN 'No' END,
+               CASE includes_green_tax WHEN 1 THEN 'Yes' WHEN 0 THEN 'No' END
+        FROM latest_availability""").fetchall()     # view: today's run, kind='availability'
+    for r, row in enumerate(rows, start=2):
+        for col, v in zip("ABEFGHIJKLM", row):     # blue input columns only; C, D, N are formulas
+            ws[f"{col}{r}"] = v
+    # ...same pattern for Rates, and one Website_Feed row (A=property_id, F=date) per active guest house per night
+    wb.save(out)
+```
+
+### 9. Scheduling
 
 ```bash
 # Option A — cron on any always-on machine set to Maldives time (07:00 MVT)
