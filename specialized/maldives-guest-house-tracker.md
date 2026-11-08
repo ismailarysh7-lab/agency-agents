@@ -422,6 +422,7 @@ Rules for the export:
 - `lowest_price_per_night_usd` is the lowest **all-in** price (service charge, T-GST, green tax) across platforms; leave it blank when the tax basis is unknown rather than publish a guessed figure
 - Dates are real dates (`yyyy-mm-dd`, Maldives time); prices are numbers in USD, never text with currency symbols
 - If the importer needs CSV, export only `Website_Feed` as CSV UTF-8
+- Respect the importer's per-upload row limit (sukunmaldives.com: 2,000 rows = 33 guest houses × 60 nights): write one workbook per batch, grouping whole islands where possible and splitting large islands across files
 
 ```python
 # export_excel.py — fill the template's input columns from rates.sqlite
