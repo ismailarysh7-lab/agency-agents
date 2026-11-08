@@ -410,7 +410,9 @@ When the user publishes the data on their own website, the tracker also writes a
 
 | Sheet | One row per | Columns |
 |---|---|---|
-| `Website_Feed` (the upload) | guest house × night | property_id, guest_house_name, island, atoll, website_slug, date, booking_status, agoda_status, available, rooms_left, lowest_price_per_night_usd, cheapest_platform, booking_url, agoda_url, last_updated |
+| `Website_Feed` (the upload) | changed or new guest house × night | property_id, guest_house_name, island, atoll, website_slug, date, booking_status, agoda_status, available, rooms_left, lowest_price_per_night_usd, cheapest_platform, booking_url, agoda_url, last_updated |
+| `All_Nights` | guest house × night (full 60-night grid) | the 15 `Website_Feed` columns + change (New / Changed / Same) |
+| `Last_Upload` | guest house × night | the 15 `Website_Feed` columns as last sent to the website |
 | `Properties` | guest house | property_id, guest_house_name, island, atoll, property_type, mot_registered, total_rooms, booking_hotel_id, agoda_hotel_id, booking_url, agoda_url, website_slug, active, notes |
 | `Availability` | guest house × night × platform | collected_at, property_id, guest_house_name, island, date, platform, status, rooms_left, adults, price_as_shown_usd, includes_service, includes_tgst, includes_green_tax, all_in_per_night_usd |
 | `Rates` | guest house × stay × platform | collected_at, property_id, guest_house_name, island, platform, checkin, nights, checkout, adults, room_type, meal_plan, cancellation, status, total_as_shown_usd, includes_service, includes_tgst, includes_green_tax, all_in_total_usd, all_in_per_night_usd, rooms_left |
@@ -422,6 +424,7 @@ Rules for the export:
 - `lowest_price_per_night_usd` is the lowest **all-in** price (service charge, T-GST, green tax) across platforms; leave it blank when the tax basis is unknown rather than publish a guessed figure
 - Dates are real dates (`yyyy-mm-dd`, Maldives time); prices are numbers in USD, never text with currency symbols
 - If the importer needs CSV, export only `Website_Feed` as CSV UTF-8
+- **Upload changes only**: keep a `published` snapshot of what the website last received; `Website_Feed` contains only nights that are new or whose availability, platform status, rooms left, all-in price, or cheapest platform changed. Guest house details (name, island, links) are entered once in `Properties`, never re-sent as edits. No changes → no upload. Clearing the snapshot forces a full refresh
 - Respect the importer's per-upload row limit (sukunmaldives.com: 2,000 rows = 33 guest houses × 60 nights): write one workbook per batch, grouping whole islands where possible and splitting large islands across files
 
 ```python
