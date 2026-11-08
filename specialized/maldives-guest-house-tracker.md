@@ -413,7 +413,7 @@ When the user publishes the data on their own website, the tracker also writes a
 | `Website_Feed` (the upload) | changed or new guest house × night | property_id, guest_house_name, island, atoll, website_slug, date, booking_status, agoda_status, available, rooms_left, lowest_price_per_night_usd, cheapest_platform, booking_url, agoda_url, last_updated |
 | `All_Nights` | guest house × night (full 60-night grid) | the 15 `Website_Feed` columns + change (New / Changed / Same) |
 | `Last_Upload` | guest house × night | the 15 `Website_Feed` columns as last sent to the website |
-| `Room_Types` (monthly) | room type | property_id, guest_house_name, island, room_type_id, room_category (Standard Room / Deluxe Room / Beach View Room / Family Room / Suite), room_name, view_type (Sea View / Beach View / City View / Garden View / Pool View), max_guests, number_of_rooms, meal_plan, rate_usd, rate_includes_taxes, all_in_price_per_night_usd, valid_month, photo_1_url … photo_8_url, photo_count, photos_ok, notes |
+| `Room_Types` (monthly) | room category per guest house | property_id, guest_house_name, island, room_category (Standard Room / Deluxe Room / Beach View Room / Family Room / Suite), view_type_1, view_type_2 (Sea View / Beach View / City View / Garden View / Pool View), max_guests, number_of_rooms, price_mvr_per_night, available, valid_month, photo_1_url … photo_8_url, photo_count, photos_ok, notes |
 | `Properties` | guest house | property_id, guest_house_name, island, atoll, property_type, mot_registered, total_rooms, booking_hotel_id, agoda_hotel_id, booking_url, agoda_url, website_slug, active, notes |
 | `Availability` | guest house × night × platform | collected_at, property_id, guest_house_name, island, date, platform, status, rooms_left, adults, price_as_shown_usd, includes_service, includes_tgst, includes_green_tax, all_in_per_night_usd |
 | `Rates` | guest house × stay × platform | collected_at, property_id, guest_house_name, island, platform, checkin, nights, checkout, adults, room_type, meal_plan, cancellation, status, total_as_shown_usd, includes_service, includes_tgst, includes_green_tax, all_in_total_usd, all_in_per_night_usd, rooms_left |
@@ -448,7 +448,19 @@ def export(db_path="rates.sqlite", template="examples/maldives-guest-house-track
     wb.save(out)
 ```
 
-### 9. Scheduling
+### 9. Uploading to the Website (Lovable) Without Using Credits
+
+When the website is a Lovable app, split the work. **One-time feature changes** go through Lovable's AI and use its credits. **Recurring data updates** never do: the agent writes them straight into the site's database with the Lovable `query_database` tool.
+
+1. Read the current site state (guest house listings, `property_id → listing_id` mappings, existing rooms and photos) with one read-only query
+2. Run `sync_to_lovable.py daily` (prices and availability) or `sync_to_lovable.py monthly` (rooms). It applies the site's own validation and generates SQL
+3. Stop on any error or unmatched guest house. Duplicate listings exist, so a match is never guessed, and the user confirms each new mapping once
+4. Run the SQL files in order and report nights added and changed, rooms added and updated, and rooms skipped for photos
+5. Writes are idempotent: daily rows change only when values differ and never over newer data; room photos are merged, never removed; room types are never deleted
+
+Before the first real write on a new schema, validate each statement with `EXPLAIN` (it plans the statement without executing it).
+
+### 10. Scheduling
 
 ```bash
 # Option A — cron on any always-on machine set to Maldives time (07:00 MVT)
