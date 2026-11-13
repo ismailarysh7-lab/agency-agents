@@ -72,7 +72,7 @@ def download(url, dest):
     if os.path.exists(dest):
         return dest, None
     try:
-        r = requests.get(url, timeout=30, stream=True)
+        r = requests.get(url, timeout=30, stream=True, headers={"User-Agent": "Mozilla/5.0 (compatible; SukunPhotoReview/1.0)", "Accept": "image/*,*/*;q=0.8"})
         r.raise_for_status()
         data = r.raw.read(15 * 1024 * 1024 + 1, decode_content=True)
         if len(data) > 15 * 1024 * 1024:
