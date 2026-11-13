@@ -6,6 +6,7 @@ Files that go with [`specialized/maldives-guest-house-tracker.md`](../../special
 |---|---|
 | `sukun-maldives-guest-houses-template.xlsx` | The workbook: daily prices and availability, plus the monthly `Room_Types` sheet |
 | `sync_to_lovable.py` | Checks the workbook and turns it into SQL for the site's (Lovable / Supabase) database |
+| `photo_review.py` | Photo clean-up: downloads guest house and room photos into numbered contact sheets for Claude to review, then applies a new order (best cover first) and removes photos with people, keeping a backup on each listing so it can be undone |
 
 ## Who does what
 
