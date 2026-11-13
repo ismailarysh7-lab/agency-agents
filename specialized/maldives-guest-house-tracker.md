@@ -414,6 +414,7 @@ When the user publishes the data on their own website, the tracker also writes a
 | `All_Nights` | guest house × night (full 60-night grid) | the 15 `Website_Feed` columns + change (New / Changed / Same) |
 | `Last_Upload` | guest house × night | the 15 `Website_Feed` columns as last sent to the website |
 | `Room_Types` (monthly) | room category per guest house | property_id, guest_house_name, island, room_category (Standard Room / Deluxe Room / Beach View Room / Family Room / Suite), view_type_1, view_type_2 (Sea View / Beach View / City View / Garden View / Pool View), max_guests, number_of_rooms, price_mvr_per_night, available, valid_month, photo_1_url … photo_8_url, photo_count, photos_ok, notes |
+| `Contacts` (when changed) | guest house | property_id, guest_house_name, island, phone, whatsapp, email, contact_ok, notes |
 | `Properties` | guest house | property_id, guest_house_name, island, atoll, property_type, mot_registered, total_rooms, booking_hotel_id, agoda_hotel_id, booking_url, agoda_url, website_slug, active, notes |
 | `Availability` | guest house × night × platform | collected_at, property_id, guest_house_name, island, date, platform, status, rooms_left, adults, price_as_shown_usd, includes_service, includes_tgst, includes_green_tax, all_in_per_night_usd |
 | `Rates` | guest house × stay × platform | collected_at, property_id, guest_house_name, island, platform, checkin, nights, checkout, adults, room_type, meal_plan, cancellation, status, total_as_shown_usd, includes_service, includes_tgst, includes_green_tax, all_in_total_usd, all_in_per_night_usd, rooms_left |
@@ -425,6 +426,7 @@ Rules for the export:
 - `lowest_price_per_night_usd` is the lowest **all-in** price (service charge, T-GST, green tax) across platforms; leave it blank when the tax basis is unknown rather than publish a guessed figure
 - Dates are real dates (`yyyy-mm-dd`, Maldives time); prices are numbers in USD, never text with currency symbols
 - If the importer needs CSV, export only `Website_Feed` as CSV UTF-8
+- **Contacts are a separate upload**: phone, WhatsApp and email go in the `Contacts` sheet and are published only when they change, written to the listing's `details` (`contact`, `whatsapp`, `email`) with no site code change; blank cells never erase existing values
 - **Room details are monthly, not daily**: room category, view type, monthly room price and photos go in `Room_Types` and are uploaded once a month; every room type needs at least 5 photos the owner has the right to publish (never copy OTA photos)
 - **Upload changes only**: keep a `published` snapshot of what the website last received; `Website_Feed` contains only nights that are new or whose availability, platform status, rooms left, all-in price, or cheapest platform changed. Guest house details (name, island, links) are entered once in `Properties`, never re-sent as edits. No changes → no upload. Clearing the snapshot forces a full refresh
 - Respect the importer's per-upload row limit (sukunmaldives.com: 2,000 rows = 33 guest houses × 60 nights): write one workbook per batch, grouping whole islands where possible and splitting large islands across files

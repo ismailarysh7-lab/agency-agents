@@ -7,6 +7,8 @@ It never talks to the network itself.
   daily   -> guesthouse_daily_rates (+ guesthouse_feed_properties mapping)
              source: All_Nights (full grid) if it has rows, else Website_Feed.
              Only nights whose values changed are written (IS DISTINCT FROM).
+  contacts -> market_listings.details (contact, email, whatsapp) from the Contacts sheet.
+             Separate from prices; blank cells never erase what the site has.
   monthly -> market_units (room category = name, view_types, capacity, quantity, price MVR,
              available, images). Photos are merged, never removed; rooms with < 5 photos in
              total are skipped and reported.
@@ -14,6 +16,7 @@ It never talks to the network itself.
 Usage:
   python3 sync_to_lovable.py daily   WORKBOOK.xlsx --site site.json --out DIR [--chunk 300]
   python3 sync_to_lovable.py monthly WORKBOOK.xlsx --site site.json --out DIR
+  python3 sync_to_lovable.py contacts WORKBOOK.xlsx --site site.json --out DIR
   python3 sync_to_lovable.py site-query          # prints the SQL that produces site.json
 
 site.json is the `site` value returned by the site-query, saved to a file.
@@ -33,11 +36,23 @@ STATUS = {"Yes", "No", "No data"}
 PLATFORMS = {"Booking.com", "Agoda"}
 ROOM_TYPES = ["Standard Room", "Deluxe Room", "Beach View Room", "Family Room", "Suite"]
 ROOM_VIEWS = ["Sea View", "Beach View", "City View", "Garden View", "Pool View"]
+CONTACT_HEADERS = ["property_id", "guest_house_name", "island", "phone", "whatsapp", "email", "contact_ok", "notes"]
 MIN_ROOM_PHOTOS = 5
+# Guest houses whose WhatsApp button comes from the site's built-in directory (src/lib/directory-data.ts),
+# which wins over listing details until the site code changes. Phone and email still update.
+DIRECTORY_WHATSAPP = {
+    ("kudhi boli beach house", "thulusdhoo"), ("bibee surf thulusdhoo", "thulusdhoo"), ("golhaa view inn", "thulusdhoo"),
+    ("dream inn thulusdhoo", "thulusdhoo"), ("whale shark beach", "dhigurah"), ("dhiguveli", "dhigurah"),
+    ("akiri dhigurah", "dhigurah"), ("fulidhoo guesthouse", "fulidhoo"), ("ukulhas sands", "ukulhas"),
+    ("island villa ukulhas", "ukulhas"), ("ras rana lodge", "rasdhoo"), ("acqua blu rasdhoo", "rasdhoo"),
+    ("rv thoddoo maldives", "thoddoo"), ("amazing view thoddoo", "thoddoo"), ("chillax thoddoo", "thoddoo"),
+    ("sunrise stay maldives", "hulhumalé"),
+}
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[A-Za-z]{2,}$")
 MAX_ROWS_PER_UPLOAD = 2000
 
 SITE_QUERY = """SELECT json_build_object(
- 'listings', (SELECT coalesce(json_agg(json_build_object('id', id, 'title', title, 'island', island, 'status', status)), '[]')
+ 'listings', (SELECT coalesce(json_agg(json_build_object('id', id, 'title', title, 'island', island, 'status', status, 'details', coalesce(details, '{}'::jsonb))), '[]')
               FROM market_listings WHERE category::text IN ('guesthouse','homestay')),
  'mappings', (SELECT coalesce(json_object_agg(property_id, listing_id), '{}') FROM guesthouse_feed_properties),
  'units',    (SELECT coalesce(json_agg(json_build_object('id', u.id, 'listing_id', u.listing_id, 'name', u.name, 'images', u.images, 'image_url', u.image_url)), '[]')
@@ -341,10 +356,118 @@ def monthly_sql(rows, listing, site):
     return stmts, skipped, plan
 
 
+# ---------------------------------------------------------------- contacts
+def phone_e164(v):
+    """'+960 777 1234', '7771234', '960-7771234' -> '+960 7771234'; other countries keep their + code. None if invalid."""
+    s = text(v)
+    if not s:
+        return ""
+    plus = s.startswith("+")
+    digits = re.sub(r"\D", "", s)
+    if not plus and len(digits) == 7:
+        digits = "960" + digits
+    elif not plus and not digits.startswith("960"):
+        return None
+    if digits.startswith("960"):
+        return "+960 " + digits[3:] if len(digits) == 10 else None
+    return "+" + digits if 8 <= len(digits) <= 15 else None
+
+
+def parse_contacts(wb):
+    ex = example_ids(wb)
+    rows = sheet_rows(wb, "Contacts", CONTACT_HEADERS)
+    if rows is None:
+        raise SystemExit("Workbook has no Contacts sheet.")
+    out, errors, keys = [], [], set()
+    for i, v in rows:
+        where = f"Contacts row {i}"
+        pid = text(v["property_id"])
+        if not pid:
+            errors.append(f"{where}: property_id is missing"); continue
+        if pid in ex or re.search("example", text(v["notes"]), re.I) or re.search("example|unknown id", text(v["guest_house_name"]), re.I):
+            errors.append(f"{where}: replace EXAMPLE / Unknown ID property {pid}"); continue
+        phone, wa, email = phone_e164(v["phone"]), phone_e164(v["whatsapp"]), text(v["email"]).lower()
+        if phone is None:
+            errors.append(f"{where}: phone '{text(v['phone'])}' is not a valid number (use +960 and 7 digits, or + and country code)"); continue
+        if wa is None:
+            errors.append(f"{where}: whatsapp '{text(v['whatsapp'])}' is not a valid number (use +960 and 7 digits, or + and country code)"); continue
+        if email and not EMAIL_RE.match(email):
+            errors.append(f"{where}: email '{email}' doesn't look valid"); continue
+        if not (phone or wa or email):
+            continue
+        if pid in keys:
+            errors.append(f"{where}: {pid} appears twice"); continue
+        keys.add(pid)
+        out.append({"property_id": pid, "guest_house_name": text(v["guest_house_name"]), "island": text(v["island"]),
+                    "phone": phone, "whatsapp": wa, "email": email})
+    if not out and not errors:
+        errors.append("Contacts has no rows with a phone, WhatsApp or email.")
+    return out, errors
+
+
+def contact_text(phone, wa):
+    """What the site's providerContact() reads: the first number is the Call number,
+    the number after the word 'WhatsApp' is the WhatsApp number."""
+    if phone and wa and re.sub(r"\D", "", phone) != re.sub(r"\D", "", wa):
+        return f"{phone} · WhatsApp {wa}"
+    if phone:
+        return phone
+    return f"WhatsApp {wa}" if wa else ""
+
+
+def contacts_sql(rows, listing, site):
+    by_id = {l["id"]: l for l in site["listings"]}
+    patches, notes = [], []
+    for r in rows:
+        lid = listing[r["property_id"]]
+        l = by_id[lid]
+        old = l.get("details") or {}
+        old_contact = text(old.get("contact"))
+        # keep the other half of the contact when only one number is given
+        old_phone = re.split(r"\s*·?\s*whatsapp", old_contact, flags=re.I)[0].strip(" ·/")
+        m = re.search(r"whatsapp\s*(\+?[\d\s-]{7,})", old_contact, re.I)
+        old_wa = phone_e164(m.group(1)) if m else ""
+        phone = r["phone"] or phone_e164(old_phone) or ""
+        wa = r["whatsapp"] or old_wa or ""
+        patch = {}
+        new_contact = contact_text(phone, wa)
+        if new_contact and new_contact != old_contact:
+            patch["contact"] = new_contact
+        if r["whatsapp"] and r["whatsapp"] != text(old.get("whatsapp")):
+            patch["whatsapp"] = r["whatsapp"]
+        if r["email"] and r["email"] != text(old.get("email")).lower():
+            patch["email"] = r["email"]
+        if (norm(l["title"]), norm(l["island"])) in DIRECTORY_WHATSAPP and r["whatsapp"]:
+            notes.append(f"{r['property_id']} ({l['title']}): the WhatsApp button keeps the site's directory number until the site code reads details.whatsapp; phone and email still update")
+        if patch:
+            patches.append((lid, r["property_id"], patch))
+    if not patches:
+        return [], notes, 0
+    values = ",\n ".join(f"({q(lid)}, {q(json.dumps(p, ensure_ascii=False))})" for lid, _, p in patches)
+    maps = sorted({(pid, lid) for lid, pid, _ in patches})
+    maps_sql = ", ".join(f"({q(p)}, {q(l)}::uuid)" for p, l in maps)
+    stmt = f"""WITH v(listing_id, patch) AS (VALUES
+ {values}
+), m AS (
+ INSERT INTO guesthouse_feed_properties(property_id, listing_id) VALUES {maps_sql}
+ ON CONFLICT (property_id) DO UPDATE SET listing_id = EXCLUDED.listing_id, updated_at = now()
+ WHERE guesthouse_feed_properties.listing_id IS DISTINCT FROM EXCLUDED.listing_id
+ RETURNING 1
+), u AS (
+ UPDATE market_listings l SET details = coalesce(l.details, '{{}}'::jsonb) || v.patch::jsonb
+ FROM v WHERE l.id = v.listing_id::uuid AND l.category::text IN ('guesthouse','homestay')
+   AND NOT (coalesce(l.details, '{{}}'::jsonb) @> v.patch::jsonb)
+ RETURNING l.id
+)
+SELECT (SELECT count(*) FROM u) AS listings_updated, (SELECT count(*) FROM m) AS mappings_saved;
+"""
+    return [stmt], notes, len(patches)
+
+
 # ---------------------------------------------------------------- main
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("mode", choices=["daily", "monthly", "site-query"])
+    ap.add_argument("mode", choices=["daily", "monthly", "contacts", "site-query"])
     ap.add_argument("workbook", nargs="?")
     ap.add_argument("--site", help="JSON from the site-query")
     ap.add_argument("--out", help="directory for generated .sql files")
@@ -363,6 +486,9 @@ def main():
     if a.mode == "daily":
         src, rows, errors = parse_daily(wb)
         report.update(source=src, rows=len(rows))
+    elif a.mode == "contacts":
+        rows, errors = parse_contacts(wb)
+        report.update(source="Contacts", rows=len(rows))
     else:
         rows, errors = parse_monthly(wb)
         report.update(source="Room_Types", rows=len(rows))
@@ -381,6 +507,15 @@ def main():
             files.append(path)
         report["nights"] = len(rows)
         report["guest_houses"] = len({r["property_id"] for r in rows})
+    elif a.mode == "contacts":
+        stmts, notes, n = contacts_sql(rows, listing, site)
+        for k, st in enumerate(stmts, 1):
+            path = os.path.join(a.out, f"contacts_{k:03d}.sql")
+            open(path, "w").write(st)
+            files.append(path)
+        report["listings_to_update"] = n
+        report["unchanged"] = len(rows) - n
+        report["whatsapp_directory_notes"] = notes
     else:
         stmts, skipped, plan = monthly_sql(rows, listing, site)
         for n, s in enumerate(stmts, 1):

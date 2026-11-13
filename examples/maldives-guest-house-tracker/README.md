@@ -14,6 +14,7 @@ Files that go with [`specialized/maldives-guest-house-tracker.md`](../../special
 | Site features (new pages, fields, upload screens) | one time | Lovable (uses Lovable credits) |
 | Prices and availability per night → `guesthouse_daily_rates` | daily, changed nights only | Claude: Excel → `sync_to_lovable.py daily` → Lovable `query_database` |
 | Room categories, views, guests, rooms, price (MVR), photos → `market_units` | monthly | Claude: Excel → `sync_to_lovable.py monthly` → Lovable `query_database` |
+| Phone, WhatsApp and email shown on the website → `market_listings.details` | only when they change, as a separate upload | Claude: Excel `Contacts` sheet → `sync_to_lovable.py contacts` → Lovable `query_database` |
 | Guest house details (name, island, links) | once, then only when they change | You, on the `Properties` sheet |
 
 Writing data with `query_database` changes rows in the site's database directly. It does not ask Lovable's AI to do anything.
@@ -24,6 +25,7 @@ Writing data with `query_database` changes rows in the site's database directly.
 2. Generate the SQL:
    - daily: `python3 sync_to_lovable.py daily  WORKBOOK.xlsx --site site.json --out out/`
    - monthly: `python3 sync_to_lovable.py monthly WORKBOOK.xlsx --site site.json --out out/`
+   - contacts: `python3 sync_to_lovable.py contacts WORKBOOK.xlsx --site site.json --out out/`
 3. If the report says `fix_needed`, stop and show the user the errors and any unmatched guest houses. Some listings exist more than once (for example drafts), so a match is never guessed. The user confirms the right listing, and that `property_id → listing_id` pair goes into `site.json` → `mappings`.
 4. Otherwise, run each `out/*.sql` file with `query_database`, in order, and add up the returned counts.
 5. Report back: nights added and changed, rooms added and updated, rooms skipped for photos.
@@ -37,3 +39,8 @@ Writing data with `query_database` changes rows in the site's database directly.
 - Monthly: room category is one of Standard Room, Deluxe Room, Beach View Room, Family Room or Suite. Views come from Sea View, Beach View, City View, Garden View or Pool View. Price is in MVR per night.
 - Photos are merged and never removed. Photos already on the website count toward the minimum. A room with fewer than 5 photos in total is skipped and reported.
 - Room types missing from the file are never deleted.
+- Contacts: numbers are tidied to `+960 7771234` (other countries keep their `+` code), and email must look valid. A blank cell never erases what the site has.
+- WhatsApp works with no site change. The site's call/WhatsApp logic reads `details.contact`: the first number is the Call number, and the number after the word "WhatsApp" is the WhatsApp number. So a different WhatsApp is written as `+960 7771234 · WhatsApp +960 9601234`, and also stored in `details.whatsapp`.
+- Exception: about 15 guest houses in the site's built-in directory (`src/lib/directory-data.ts`) take their WhatsApp button from that directory. For those, the uploader reports that only phone and email change on screen.
+
+The agent page (claude.ai artifact) does the same checks and publishing in the browser: load the workbook, check, confirm, publish.
